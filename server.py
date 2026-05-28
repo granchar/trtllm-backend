@@ -302,6 +302,9 @@ class LLMManager:
 
 llm_manager = LLMManager()
 
+# ============ 会话存储 ============
+chat_history = []  # [{"role": "user"|"assistant", "content": "...", "latency": 0}]
+
 # ============ API 路由 ============
 
 class ChatRequest(BaseModel):
@@ -344,7 +347,7 @@ def get_gpu_info():
 
 @app.get("/api/status")
 async def get_status():
-    """获取当前状态（含 GPU 实时信息）"""
+    """获取当前状态（含 GPU 实时信息 + 会话历史）"""
     gpu = get_gpu_info()
     return {
         "current_model": llm_manager.current_model_id,
@@ -355,7 +358,20 @@ async def get_status():
         "engine_type": llm_manager.engine_type,
         "trtllm_version": "0.9.0",
         "gpu": gpu,
+        "chat_history": chat_history,
     }
+
+@app.get("/api/history")
+async def get_history():
+    """获取会话历史"""
+    return chat_history
+
+@app.post("/api/history/clear")
+async def clear_history():
+    """清空会话历史"""
+    global chat_history
+    chat_history = []
+    return {"status": "ok"}
 
 @app.get("/api/gpu")
 async def gpu_status():
@@ -499,6 +515,9 @@ async def chat(req: ChatRequest):
         t0 = time.time()
         reply = llm_manager.generate(req.prompt, req.max_new_tokens)
         latency = time.time() - t0
+        # 保存到会话历史
+        chat_history.append({"role": "user", "content": req.prompt})
+        chat_history.append({"role": "assistant", "content": reply, "latency": round(latency, 2)})
         return {"reply": reply, "latency": round(latency, 2), "engine": llm_manager.engine_type}
     except Exception as e:
         raise HTTPException(500, f"推理失败: {str(e)}")
