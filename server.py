@@ -240,8 +240,11 @@ class LLMManager:
 
         self.loading_progress = "正在加载模型权重到 GPU（可能需要1-3分钟）..."
 
-        # 根据模型大小选择精度
-        num_params = cfg.get("num_hidden_layers", 24) * cfg.get("hidden_size", 2048) * cfg.get("num_attention_heads", 32) * 128
+        # 根据模型大小自动选择精度，避免 OOM
+        num_params_est = cfg.get("num_hidden_layers", 24) * cfg.get("hidden_size", 2048) * cfg.get("intermediate_size", 8192)
+        # 8B+ 模型约 >10B 参数，用 8-bit 量化节省显存
+        use_8bit = num_params_est > 8_000_000_000
+
         load_kwargs = {
             "pretrained_model_name_or_path": model_path,
             "trust_remote_code": True,
@@ -249,6 +252,10 @@ class LLMManager:
             "torch_dtype": torch.float16,
             "device_map": "auto",
         }
+
+        if use_8bit:
+            self.loading_progress = "模型较大，使用 8-bit 量化加载（节省约50%显存）..."
+            load_kwargs["load_in_8bit"] = True
 
         self.hf_model = AutoModelForCausalLM.from_pretrained(**load_kwargs)
 
