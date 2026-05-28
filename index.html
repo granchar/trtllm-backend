@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TensorRT-LLM Chat</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:#0f172a;color:#e2e8f0;height:100vh;display:flex}
+.sidebar{width:320px;background:#1e293b;border-right:1px solid #334155;display:flex;flex-direction:column;flex-shrink:0}
+.sidebar-header{padding:20px;border-bottom:1px solid #334155}
+.sidebar-header h1{font-size:18px;color:#38bdf8;margin-bottom:4px}
+.sidebar-header .version{font-size:12px;color:#64748b}
+.gpu-panel{padding:16px;border-bottom:1px solid #334155;background:#0f172a}
+.gpu-panel h3{font-size:12px;color:#94a3b8;text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px}
+.gpu-row{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;font-size:12px}
+.gpu-row .label{color:#94a3b8}
+.gpu-row .value{font-weight:600;font-variant-numeric:tabular-nums}
+.gpu-bar{height:6px;background:#334155;border-radius:3px;margin-top:4px;overflow:hidden}
+.gpu-bar-fill{height:100%;border-radius:3px;transition:width .5s}
+.mem-bar .gpu-bar-fill{background:linear-gradient(90deg,#22c55e,#eab308,#ef4444)}
+.util-bar .gpu-bar-fill{background:#38bdf8}
+.gpu-detail-grid{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:10px}
+.gpu-detail-item{background:#1e293b;border-radius:6px;padding:8px;text-align:center}
+.gpu-detail-item .val{font-size:16px;font-weight:700;color:#e2e8f0}
+.gpu-detail-item .lbl{font-size:10px;color:#64748b;margin-top:2px}
+.gpu-detail-item.hot .val{color:#ef4444}
+.gpu-detail-item.warm .val{color:#f59e0b}
+.model-section{padding:16px;flex:1;overflow-y:auto}
+.model-section h3{font-size:13px;color:#94a3b8;text-transform:uppercase;letter-spacing:.5px;margin-bottom:12px}
+.model-card{background:#0f172a;border:1px solid #334155;border-radius:8px;padding:12px;margin-bottom:8px;cursor:pointer;transition:all .2s}
+.model-card:hover{border-color:#38bdf8}
+.model-card.active{border-color:#38bdf8;background:#0c4a6e}
+.model-card .name{font-size:14px;font-weight:600;margin-bottom:4px}
+.model-card .desc{font-size:12px;color:#94a3b8;margin-bottom:6px}
+.model-card .meta{display:flex;justify-content:space-between;align-items:center}
+.model-card .size{font-size:11px;color:#64748b}
+.badge{display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:500}
+.badge-downloaded{background:#065f46;color:#6ee7b7}
+.badge-active{background:#1e40af;color:#93c5fd}
+.badge-loading{background:#92400e;color:#fcd34d;animation:pulse 1.5s infinite}
+.btn{padding:8px 16px;border:none;border-radius:6px;cursor:pointer;font-size:13px;font-weight:500;transition:all .2s}
+.btn-primary{background:#2563eb;color:#fff}
+.btn-primary:hover{background:#1d4ed8}
+.btn-primary:disabled{background:#475569;cursor:not-allowed}
+.btn-download{background:#059669;color:#fff;font-size:11px;padding:4px 10px}
+.btn-download:hover{background:#047857}
+.chat-area{flex:1;display:flex;flex-direction:column}
+.chat-header{padding:16px 24px;border-bottom:1px solid #334155;background:#1e293b}
+.chat-header .model-info{display:flex;align-items:center;gap:12px}
+.chat-header .model-name{font-size:16px;font-weight:600}
+.chat-header .model-detail{font-size:12px;color:#94a3b8}
+.status-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+.status-ready{background:#22c55e}
+.status-loading{background:#f59e0b;animation:pulse 1.5s infinite}
+.status-idle{background:#64748b}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
+.messages{flex:1;overflow-y:auto;padding:24px}
+.message{margin-bottom:20px;display:flex;gap:12px}
+.message.user{flex-direction:row-reverse}
+.avatar{width:36px;height:36px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0}
+.avatar.user{background:#2563eb}
+.avatar.assistant{background:#059669}
+.bubble{max-width:70%;padding:12px 16px;border-radius:12px;line-height:1.6;font-size:14px;white-space:pre-wrap;word-break:break-word}
+.message.user .bubble{background:#2563eb;color:#fff;border-bottom-right-radius:4px}
+.message.assistant .bubble{background:#1e293b;border:1px solid #334155;border-bottom-left-radius:4px}
+.latency{font-size:11px;color:#64748b;margin-top:4px}
+.input-area{padding:16px 24px;border-top:1px solid #334155;background:#1e293b}
+.input-row{display:flex;gap:8px}
+.input-row textarea{flex:1;background:#0f172a;border:1px solid #334155;border-radius:8px;padding:12px;color:#e2e8f0;font-size:14px;resize:none;outline:none;font-family:inherit;min-height:44px;max-height:120px}
+.input-row textarea:focus{border-color:#38bdf8}
+.input-row .btn{padding:12px 24px;font-size:14px}
+.welcome{text-align:center;padding:60px 20px;color:#64748b}
+.welcome h2{font-size:24px;color:#94a3b8;margin-bottom:8px}
+.welcome p{font-size:14px}
+.loading-bar{padding:12px 24px;background:#1e293b;border-bottom:1px solid #334155;display:none}
+.loading-bar.show{display:block}
+.loading-bar .text{font-size:13px;color:#fcd34d}
+.loading-bar .progress{height:3px;background:#334155;border-radius:2px;margin-top:8px;overflow:hidden}
+.loading-bar .progress-fill{height:100%;background:#38bdf8;border-radius:2px;animation:indeterminate 2s infinite}
+@keyframes indeterminate{0%{width:0;margin-left:0}50%{width:60%;margin-left:20%}100%{width:0;margin-left:100%}}
+.config-tags{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
+.config-tag{background:#334155;padding:2px 8px;border-radius:4px;font-size:11px;color:#94a3b8}
+::-webkit-scrollbar{width:6px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:#475569;border-radius:3px}
+</style>
+</head>
+<body>
+<div class="sidebar">
+  <div class="sidebar-header">
+    <h1>TensorRT-LLM Chat</h1>
+    <div class="version">v0.9.0</div>
+  </div>
+  <div class="gpu-panel">
+    <h3>GPU Status</h3>
+    <div id="gpuInfo"><span style="color:#64748b;font-size:12px">Loading...</span></div>
+  </div>
+  <div class="model-section">
+    <h3>Available Models</h3>
+    <div id="modelList"></div>
+  </div>
+</div>
+<div class="chat-area">
+  <div class="chat-header">
+    <div class="model-info">
+      <div class="status-dot status-idle" id="statusDot"></div>
+      <div>
+        <div class="model-name" id="headerModelName">No Model Loaded</div>
+        <div class="model-detail" id="headerModelDetail">Select a model to start</div>
+      </div>
+    </div>
+    <div class="config-tags" id="configTags"></div>
+  </div>
+  <div class="loading-bar" id="loadingBar">
+    <div class="text" id="loadingText">Loading...</div>
+    <div class="progress"><div class="progress-fill"></div></div>
+  </div>
+  <div class="messages" id="messages">
+    <div class="welcome">
+      <h2>Welcome to TensorRT-LLM Chat</h2>
+      <p>Select a model from the sidebar to start chatting</p>
+    </div>
+  </div>
+  <div class="input-area">
+    <div class="input-row">
+      <textarea id="userInput" placeholder="Type your message..." rows="1" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendMessage()}"></textarea>
+      <button class="btn btn-primary" id="sendBtn" onclick="sendMessage()" disabled>Send</button>
+    </div>
+  </div>
+</div>
+<script>
+let currentModel=null,isProcessing=false;
+async function init(){await loadModels();await refreshStatus();startGpuPolling()}
+function startGpuPolling(){setInterval(async function(){try{const r=await fetch("/api/gpu");const g=await r.json();if(g&&g.name)renderGpu(g)}catch(e){}},3000)}
+function renderGpu(g){
+  const memPct=Math.round(g.memory_used/g.memory_total*100);
+  const memColor=memPct>80?"#ef4444":memPct>50?"#eab308":"#22c55e";
+  const tempClass=g.temperature>80?"hot":g.temperature>60?"warm":"";
+  document.getElementById("gpuInfo").innerHTML=
+    '<div style="font-size:13px;font-weight:600;margin-bottom:8px">'+g.name+'</div>'+
+    '<div class="gpu-row"><span class="label">Memory</span><span class="value">'+g.memory_used+' / '+g.memory_total+' MiB ('+memPct+'%)</span></div>'+
+    '<div class="gpu-bar mem-bar"><div class="gpu-bar-fill" style="width:'+memPct+'%;background:'+memColor+'"></div></div>'+
+    '<div class="gpu-row" style="margin-top:8px"><span class="label">GPU Util</span><span class="value">'+g.utilization+'%</span></div>'+
+    '<div class="gpu-bar util-bar"><div class="gpu-bar-fill" style="width:'+g.utilization+'%"></div></div>'+
+    '<div class="gpu-detail-grid">'+
+      '<div class="gpu-detail-item '+tempClass+'"><div class="val">'+g.temperature+'°C</div><div class="lbl">Temperature</div></div>'+
+      '<div class="gpu-detail-item"><div class="val">'+g.power_draw+'W</div><div class="lbl">Power ('+g.power_limit+'W)</div></div>'+
+    '</div>';
+}
+async function loadModels(){const r=await fetch("/api/models");const m=await r.json();const c=document.getElementById("modelList");c.innerHTML=m.map(function(x,i){return'<div class="model-card" id="card_'+i+'" data-mid="'+x.id+'" onclick="loadModel(this.getAttribute(\'data-mid\'))"><div class="name">'+x.name+'</div><div class="desc">'+x.desc+'</div><div class="meta"><span class="size">'+x.size+'</span>'+(x.downloaded?'<span class="badge badge-downloaded">Downloaded</span>':'<button class="btn btn-download" onclick="event.stopPropagation();downloadModel(\''+x.id+'\')">Download</button>')+'</div></div>'}).join("")}
+async function downloadModel(mid){showLoading("Downloading model...");const r=await fetch("/api/download",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model_id:mid})});const rd=r.body.getReader();const dc=new TextDecoder();while(true){const{done,value}=await rd.read();if(done)break;const t=dc.decode(value);for(const ln of t.trim().split("\n")){if(!ln)continue;try{const d=JSON.parse(ln);if(d.status==="downloading")showLoading(d.message);else if(d.status==="done"){hideLoading();await loadModels()}else if(d.status==="error"){hideLoading();alert("Error: "+d.message)}}catch(e){}}}}
+async function loadModel(mid){if(isProcessing)return;isProcessing=true;showLoading("Loading model... First time ~80s to build engine.");const r=await fetch("/api/load",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model_id:mid})});const rd=r.body.getReader();const dc=new TextDecoder();while(true){const{done,value}=await rd.read();if(done)break;const t=dc.decode(value);for(const ln of t.trim().split("\n")){if(!ln)continue;try{const d=JSON.parse(ln);if(d.status==="loading")showLoading(d.message);else if(d.status==="done"){hideLoading();currentModel=mid;document.getElementById("headerModelName").textContent=d.model_name||mid;document.getElementById("sendBtn").disabled=false;updateStatus("ready");updateConfigTags(d.model_config);clearMessages();addMessage("assistant","Model "+(d.model_name||mid)+" loaded! Start chatting.");await loadModels()}else if(d.status==="error"){hideLoading();alert("Error: "+d.message)}}catch(e){}}}isProcessing=false}
+async function sendMessage(){const inp=document.getElementById("userInput");const p=inp.value.trim();if(!p||isProcessing)return;inp.value="";addMessage("user",p);isProcessing=true;document.getElementById("sendBtn").disabled=true;const t0=Date.now();try{const r=await fetch("/api/chat",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({prompt:p,max_new_tokens:256})});const d=await r.json();addMessage("assistant",d.reply,((Date.now()-t0)/1000).toFixed(2))}catch(e){addMessage("assistant","Error: "+e.message)}isProcessing=false;document.getElementById("sendBtn").disabled=false}
+function addMessage(role,text,lat){const c=document.getElementById("messages");const w=c.querySelector(".welcome");if(w)w.remove();const d=document.createElement("div");d.className="message "+role;d.innerHTML='<div class="avatar '+role+'">'+(role==="user"?"U":"AI")+'</div><div><div class="bubble">'+escapeHtml(text)+'</div>'+(lat?'<div class="latency">'+lat+'s</div>':'')+'</div>';c.appendChild(d);c.scrollTop=c.scrollHeight}
+function clearMessages(){document.getElementById("messages").innerHTML=""}
+function escapeHtml(t){const d=document.createElement("div");d.textContent=t;return d.innerHTML}
+function showLoading(t){document.getElementById("loadingBar").classList.add("show");document.getElementById("loadingText").textContent=t;updateStatus("loading")}
+function hideLoading(){document.getElementById("loadingBar").classList.remove("show")}
+function updateStatus(s){const d=document.getElementById("statusDot");d.className="status-dot";if(s==="ready"){d.classList.add("status-ready");document.getElementById("headerModelDetail").textContent="Model ready"}else if(s==="loading"){d.classList.add("status-loading");document.getElementById("headerModelDetail").textContent="Loading..."}else{d.classList.add("status-idle")}}
+function updateConfigTags(c){if(!c)return;const t=[];if(c.model_type)t.push(c.model_type);if(c.num_layers)t.push(c.num_layers+" layers");if(c.hidden_size)t.push("hidden "+c.hidden_size);if(c.num_heads)t.push(c.num_heads+" heads");document.getElementById("configTags").innerHTML=t.map(function(x){return'<span class="config-tag">'+x+'</span>'}).join("")}
+async function refreshStatus(){try{const r=await fetch("/api/status");const s=await r.json();if(s.current_model){currentModel=s.current_model;document.getElementById("headerModelName").textContent=s.current_model_name||s.current_model;document.getElementById("sendBtn").disabled=false;updateStatus("ready");updateConfigTags(s.model_config)}if(s.gpu)renderGpu(s.gpu)}catch(e){}}
+init();
+</script>
+</body>
+</html>

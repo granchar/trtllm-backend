@@ -1,0 +1,4 @@
+fastapi>=0.100.0
+uvicorn>=0.20.0
+huggingface_hub>=0.20.0
+tensorrt-llm==0.9.0
