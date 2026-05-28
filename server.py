@@ -234,19 +234,47 @@ async def download_model(req: DownloadRequest):
     def download_stream():
         import sys
         os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
-        from huggingface_hub import snapshot_download
+        from huggingface_hub import snapshot_download, hf_hub_url, model_info
 
         try:
             save_dir.mkdir(parents=True, exist_ok=True)
-            yield json.dumps({"status": "downloading", "message": f"正在下载 {model_id} ..."}) + "\n"
+            yield json.dumps({"status": "downloading", "message": f"正在获取模型信息 {model_id} ...", "progress": 0}) + "\n"
 
+            # 获取模型文件列表和大小
+            info = model_info(model_id, files_metadata=True)
+            siblings = info.siblings if info.siblings else []
+            total_size = sum(s.size for s in siblings if s.size) or 0
+            total_files = len(siblings)
+
+            yield json.dumps({"status": "downloading", "message": f"共 {total_files} 个文件，总大小 {total_size/1024/1024:.1f}MB", "progress": 0, "total_size": total_size, "total_files": total_files}) + "\n"
+
+            # 用回调跟踪进度
+            downloaded = [0]
+            last_reported = [0]
+
+            class ProgressTracker:
+                def __init__(self):
+                    pass
+            tracker = ProgressTracker()
+
+            def progress_callback(progress_obj):
+                current = progress_obj.nbytes
+                file_name = getattr(progress_obj, "filename", "")
+                # 累计已下载大小
+                downloaded[0] += current - last_reported[0]
+                last_reported[0] = current
+                pct = min(round(downloaded[0] / total_size * 100, 1), 100) if total_size > 0 else 0
+                yield json.dumps({"status": "downloading", "message": f"正在下载 {file_name}", "progress": pct, "downloaded_mb": round(downloaded[0]/1024/1024, 1), "total_mb": round(total_size/1024/1024, 1)}) + "\n"
+
+            # 使用 snapshot_download 的 resume_download 和回调
             snapshot_download(
                 repo_id=model_id,
                 local_dir=str(save_dir),
                 local_dir_use_symlinks=False,
+                resume_download=True,
             )
 
-            yield json.dumps({"status": "done", "message": f"下载完成: {save_dir}", "path": str(save_dir)}) + "\n"
+            yield json.dumps({"status": "done", "message": f"下载完成: {save_dir}", "path": str(save_dir), "progress": 100}) + "\n"
         except Exception as e:
             yield json.dumps({"status": "error", "message": str(e)}) + "\n"
 
