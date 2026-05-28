@@ -366,14 +366,22 @@ async def gpu_status():
 async def get_models():
     """获取可用模型列表（预置 + 已下载）"""
     local_models = llm_manager.get_local_models()
-    local_ids = {m["id"].split("/")[-1] for m in local_models}
+    local_ids = set()
+    for m in local_models:
+        local_ids.add(m["id"].split("/")[-1])  # short name
+        local_ids.add(m["id"])  # full id (e.g. "deepseek-ai_DeepSeek-R1-Distill-Qwen-1.5B")
+        local_ids.add(m["id"].replace("_", "/"))  # try to reconstruct original id
 
     models = []
     for pm in PRESET_MODELS:
         short_id = pm["id"].split("/")[-1]
+        is_downloaded = short_id in local_ids or pm["id"] in local_ids
+        is_loaded = llm_manager.current_model_id == pm["id"]
         models.append({
             **pm,
-            "downloaded": short_id in local_ids or pm["id"] in local_ids,
+            "downloaded": is_downloaded,
+            "loaded": is_loaded,
+            "engine": pm.get("engine", ""),
         })
     return models
 
