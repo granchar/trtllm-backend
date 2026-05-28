@@ -234,47 +234,73 @@ async def download_model(req: DownloadRequest):
     def download_stream():
         import sys
         os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
-        from huggingface_hub import snapshot_download, hf_hub_url, model_info
+        from huggingface_hub import model_info, hf_hub_download
 
         try:
             save_dir.mkdir(parents=True, exist_ok=True)
-            yield json.dumps({"status": "downloading", "message": f"正在获取模型信息 {model_id} ...", "progress": 0}) + "\n"
+            yield json.dumps({"status": "downloading", "message": "Getting model info...", "progress": 0}) + "\n"
 
-            # 获取模型文件列表和大小
+            # Get file list
             info = model_info(model_id, files_metadata=True)
-            siblings = info.siblings if info.siblings else []
-            total_size = sum(s.size for s in siblings if s.size) or 0
+            siblings = [s for s in (info.siblings or []) if not s.rfilename.endswith(".incomplete")]
+            total_size = sum(s.size for s in siblings if s.size) or 1
             total_files = len(siblings)
 
-            yield json.dumps({"status": "downloading", "message": f"共 {total_files} 个文件，总大小 {total_size/1024/1024:.1f}MB", "progress": 0, "total_size": total_size, "total_files": total_files}) + "\n"
+            yield json.dumps({
+                "status": "downloading",
+                "message": f"Preparing: {total_files} files, {total_size/1024/1024:.1f} MB",
+                "progress": 0, "total_mb": round(total_size/1024/1024, 1), "total_files": total_files
+            }) + "\n"
 
-            # 用回调跟踪进度
-            downloaded = [0]
-            last_reported = [0]
+            # Download file by file
+            downloaded_total = 0
+            for i, sibling in enumerate(siblings):
+                filename = sibling.rfilename
+                file_size = sibling.size or 0
+                file_pct_of_total = file_size / total_size * 100 if total_size > 0 else 0
 
-            class ProgressTracker:
-                def __init__(self):
-                    pass
-            tracker = ProgressTracker()
+                yield json.dumps({
+                    "status": "downloading",
+                    "message": f"[{i+1}/{total_files}] {filename}",
+                    "progress": round(downloaded_total / total_size * 100, 1),
+                    "downloaded_mb": round(downloaded_total/1024/1024, 1),
+                    "total_mb": round(total_size/1024/1024, 1),
+                    "file": filename,
+                    "file_progress": 0
+                }) + "\n"
 
-            def progress_callback(progress_obj):
-                current = progress_obj.nbytes
-                file_name = getattr(progress_obj, "filename", "")
-                # 累计已下载大小
-                downloaded[0] += current - last_reported[0]
-                last_reported[0] = current
-                pct = min(round(downloaded[0] / total_size * 100, 1), 100) if total_size > 0 else 0
-                yield json.dumps({"status": "downloading", "message": f"正在下载 {file_name}", "progress": pct, "downloaded_mb": round(downloaded[0]/1024/1024, 1), "total_mb": round(total_size/1024/1024, 1)}) + "\n"
+                # Download single file with progress callback
+                last_size = [0]
+                def file_cb(progress):
+                    chunk = progress.nbytes - last_size[0]
+                    if chunk > 0:
+                        nonlocal downloaded_total
+                        downloaded_total += chunk
+                    last_size[0] = progress.nbytes
+                    pct = round(downloaded_total / total_size * 100, 1)
+                    file_pct = round(progress.nbytes / file_size * 100, 1) if file_size > 0 else 100
+                    yield json.dumps({
+                        "status": "downloading",
+                        "message": f"[{i+1}/{total_files}] {filename}",
+                        "progress": pct,
+                        "downloaded_mb": round(downloaded_total/1024/1024, 1),
+                        "total_mb": round(total_size/1024/1024, 1),
+                        "file": filename,
+                        "file_progress": file_pct
+                    }) + "\n"
 
-            # 使用 snapshot_download 的 resume_download 和回调
-            snapshot_download(
-                repo_id=model_id,
-                local_dir=str(save_dir),
-                local_dir_use_symlinks=False,
-                resume_download=True,
-            )
+                try:
+                    hf_hub_download(
+                        repo_id=model_id,
+                        filename=filename,
+                        local_dir=str(save_dir),
+                        local_dir_use_symlinks=False,
+                        resume_download=True,
+                    )
+                except Exception as fe:
+                    yield json.dumps({"status": "downloading", "message": f"Skip {filename}: {str(fe)}", "progress": round(downloaded_total/total_size*100,1)}) + "\n"
 
-            yield json.dumps({"status": "done", "message": f"下载完成: {save_dir}", "path": str(save_dir), "progress": 100}) + "\n"
+            yield json.dumps({"status": "done", "message": f"Download complete: {save_dir}", "path": str(save_dir), "progress": 100}) + "\n"
         except Exception as e:
             yield json.dumps({"status": "error", "message": str(e)}) + "\n"
 
